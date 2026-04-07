@@ -7,8 +7,6 @@ from dotenv import load_dotenv
 LAST_POSITIONS = []
 load_dotenv()
 
-print("FILE IS RUNNING")
-
 hf_token = os.getenv("HF_TOKEN")
 api_base_url = os.getenv("API_BASE_URL")
 
