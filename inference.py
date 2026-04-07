@@ -3,6 +3,7 @@ import os
 import requests
 import time
 from dotenv import load_dotenv
+from graders import grade
 
 LAST_POSITIONS = []
 load_dotenv()
@@ -180,43 +181,66 @@ def llm_policy(state: dict) -> str:
 # MAIN LOOP
 # ------------------------
 
-def run():
-    print("Starting inference loop...")
+def run_task(task_name="task"):
+    print(f"\nRunning {task_name.upper()}...")
 
     reset_env()
     done = False
     step_count = 0
+    max_steps = 200
 
-    while not done and step_count < 200:
+    final_state = None
+
+    while not done and step_count < max_steps:
         state_data = get_state()
 
-        if not state_data:
+        if not state_data or "observation" not in state_data:
+            print("Failed to fetch state")
             break
 
         state = state_data["observation"]
+        final_state = state
 
-        print(f"\nStep {step_count}")
-        print("Position:", state["agent_position"])
-        print("Order:", state["current_order"])
-        print("Inventory:", state["inventory"])
+        print(f"Step {step_count} | Pos: {state.get('agent_position')} | "
+              f"Order: {state.get('current_order')} | Inv: {state.get('inventory')}")
 
         action = llm_policy(state)
         print("Action:", action)
 
         result = send_action(action)
 
-        print("Reward:", result.get("reward"))
-        print("Done:", result.get("done"))
+        print("Reward:", result.get("reward"), "| Done:", result.get("done"))
 
         done = result.get("done", False)
         step_count += 1
 
-        time.sleep(0.3)
+        time.sleep(0.5)
 
-    if done:
-        print("🎉 SUCCESS: Episode completed!")
-    else:
-        print("⚠️ Max steps reached")
+    return final_state
+
+def run():
+    def run():
+        print("STARTING FULL EVALUATION")
+
+        # EASY
+        state_easy = run_task("easy")
+        score_easy = grade(state_easy) if state_easy else 0
+        print("\nEASY SCORE:", score_easy)
+
+        # MEDIUM
+        state_medium = run_task("medium")
+        score_medium = grade(state_medium) if state_medium else 0
+        print("\nMEDIUM SCORE:", score_medium)
+
+        # HARD
+        state_hard = run_task("hard")
+        score_hard = grade(state_hard) if state_hard else 0
+        print("\nHARD SCORE:", score_hard)
+
+        print("\nFINAL RESULTS")
+        print("Easy  :", score_easy)
+        print("Medium:", score_medium)
+        print("Hard  :", score_hard)
 
 
 if __name__ == "__main__":
