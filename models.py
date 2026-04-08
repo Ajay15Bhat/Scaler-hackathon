@@ -9,7 +9,3 @@ class State(BaseModel):
     orders_completed: int
     time: int
     battery: int
-
-
-class Action(BaseModel):
-    action: str
