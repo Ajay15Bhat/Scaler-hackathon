@@ -1,4 +1,4 @@
-from models import State
+from server.models import State
 
 
 class WarehouseEnv:
