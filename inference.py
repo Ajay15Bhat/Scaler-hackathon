@@ -1,225 +1,161 @@
-from openai import OpenAI
 import os
 import requests
-import time
-from dotenv import load_dotenv
-from graders import grade
-from collections import deque
-import itertools
+from openai import OpenAI
 
-# ------------------------
-# INIT
-# ------------------------
-load_dotenv()
+# -----------------------------
+# Environment Variables
+# -----------------------------
+API_BASE_URL = os.environ.get("API_BASE_URL")
+MODEL_NAME = os.environ.get("MODEL_NAME")
+HF_TOKEN = os.environ.get("HF_TOKEN")
 
-hf_token = os.getenv("HF_TOKEN")
-api_base_url = os.getenv("API_BASE_URL")
+print("API_BASE_URL:", API_BASE_URL)
+print("MODEL_NAME:", MODEL_NAME)
+print("HF_TOKEN exists:", HF_TOKEN is not None)
 
-client = OpenAI(base_url=api_base_url, api_key=hf_token)
 
-BASE_URL = "https://ajay15bhat-warehouse-agent.hf.space"
+# -----------------------------
+# OpenAI Client (MANDATORY)
+# -----------------------------
+client = OpenAI(
+    base_url=API_BASE_URL,
+    api_key=HF_TOKEN
+)
 
-GRID = [
-    ["S", ".", "A", ".", "D"],
-    [".", "X", ".", ".", "B"],
-    [".", ".", ".", ".", "."],
-    ["C", ".", "X", ".", "."],
-    [".", ".", ".", ".", "."]
-]
+BASE_URL = "http://localhost:8000"
 
-GRID_SIZE = 5
 
-# ------------------------
-# API HELPERS
-# ------------------------
+# -----------------------------
+# Force LLM Ping (IMPORTANT)
+# -----------------------------
+def ping_llm():
+    print("Testing LLM connection...")
 
-def get_state():
-    return requests.get(f"{BASE_URL}/state").json()
+    response = client.chat.completions.create(
+        model=MODEL_NAME,
+        messages=[
+            {"role": "user", "content": "Ping"}
+        ],
+        temperature=0
+    )
 
-def send_action(action):
-    return requests.post(f"{BASE_URL}/step", json={"action": action}).json()
+    print("LLM Connected Successfully")
 
-def reset_env(task_name=None):
-    if task_name:
-        requests.post(f"{BASE_URL}/reset", json={"task_name": task_name})
-    else:
-        requests.post(f"{BASE_URL}/reset")
 
-# ------------------------
-# BFS PATHFINDING
-# ------------------------
+# -----------------------------
+# LLM Action Selector
+# -----------------------------
+def get_action(state):
 
-def bfs_path(start, target):
-    directions = [
-        ("move_up", (-1, 0)),
-        ("move_down", (1, 0)),
-        ("move_left", (0, -1)),
-        ("move_right", (0, 1)),
-    ]
+    prompt = f"""
+You are a warehouse robot.
 
-    queue = deque()
-    queue.append((start, []))
-    visited = set()
-    visited.add(tuple(start))
+State:
+{state}
 
-    while queue:
-        (r, c), path = queue.popleft()
+Choose one action:
 
-        if [r, c] == target:
-            return path
+move_up
+move_down
+move_left
+move_right
+pick_item
+deliver
+get_order
 
-        for action, (dr, dc) in directions:
-            nr, nc = r + dr, c + dc
+Return only action name.
+"""
 
-            if (
-                0 <= nr < GRID_SIZE and
-                0 <= nc < GRID_SIZE and
-                GRID[nr][nc] != "X" and
-                (nr, nc) not in visited
-            ):
-                visited.add((nr, nc))
-                queue.append(([nr, nc], path + [action]))
+    response = client.chat.completions.create(
+        model=MODEL_NAME,
+        messages=[
+            {"role": "system", "content": "Warehouse agent"},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0
+    )
 
-    return []
+    action = response.choices[0].message.content.strip()
 
-# ------------------------
-# DISTANCE HELPER
-# ------------------------
+    return action
 
-def get_distance(a, b):
-    return len(bfs_path(a, b))
 
-# ------------------------
-# OPTIMAL ITEM ORDER
-# ------------------------
+# -----------------------------
+# Run Task
+# -----------------------------
+def run_task(task):
 
-def get_best_item_order(position, items, item_locations, drop):
-    best_order = None
-    best_cost = float("inf")
+    print(f"\nRunning {task}")
 
-    for perm in itertools.permutations(items):
-        cost = 0
-        current = position
-
-        for item in perm:
-            loc = item_locations[item]
-            cost += get_distance(current, loc)
-            current = loc
-
-        cost += get_distance(current, drop)
-
-        if cost < best_cost:
-            best_cost = cost
-            best_order = perm
-
-    return list(best_order)
-
-# ------------------------
-# POLICY
-# ------------------------
-
-CURRENT_PLAN = []
-
-def policy(state):
-    global CURRENT_PLAN
-
-    if state["inventory"] == []:
-        CURRENT_PLAN = []
-
-    position = state["agent_position"]
-    order = state["current_order"]
-    inventory = state["inventory"]
-
-    item_locations = {
-        "A": [0, 2],
-        "B": [1, 4],
-        "C": [3, 0]
-    }
-
-    drop = [0, 4]
-
-    if order is None:
-        return "get_order"
-
-    if not CURRENT_PLAN:
-        remaining_items = [item for item in order if item not in inventory]
-
-        if remaining_items:
-            best_order = get_best_item_order(position, remaining_items, item_locations, drop)
-
-            path = []
-            current = position
-
-            for item in best_order:
-                item_pos = item_locations[item]
-                path += bfs_path(current, item_pos)
-                path.append("pick_item")
-                current = item_pos
-
-            path += bfs_path(current, drop)
-            path.append("complete_order")
-
-            CURRENT_PLAN = path
-
-    if CURRENT_PLAN:
-        return CURRENT_PLAN.pop(0)
-
-    return "move_up"
-
-# ------------------------
-# RUN TASK
-# ------------------------
-
-def run_task(task_name):
-    global CURRENT_PLAN
-
-    reset_env(task_name)
-    CURRENT_PLAN = []
-
-    print(f"[START] task={task_name}")
+    requests.post(
+        f"{BASE_URL}/reset",
+        json={"task": task}
+    )
 
     done = False
     steps = 0
-    final_state = None
 
-    while not done and steps < 200:
-        state = get_state()["observation"]
-        final_state = state
+    while not done and steps < 100:
 
-        action = policy(state)
-        result = send_action(action)
+        state = requests.get(
+            f"{BASE_URL}/state"
+        ).json()
+
+        action = get_action(state)
+
+        response = requests.post(
+            f"{BASE_URL}/step",
+            json={"action": action}
+        ).json()
+
+        done = response["done"]
 
         print(
-            f"[STEP] step={steps} "
-            f"pos={state['agent_position']} "
-            f"order={state['current_order']} "
-            f"inv={state['inventory']} "
-            f"action={action} "
-            f"reward={result.get('reward')} "
-            f"done={result.get('done')}"
+            f"Step {steps} | Action: {action} | Reward: {response['reward']}"
         )
 
-        done = result.get("done", False)
         steps += 1
-        time.sleep(0.2)
 
-    score = grade(final_state)
+    return response["state"]
 
-    print(f"[END] task={task_name} score={score}")
 
-    return score
+# -----------------------------
+# Grader
+# -----------------------------
+def grade(state):
 
-# ------------------------
-# MAIN RUN
-# ------------------------
+    completion = state.get("orders_completed", 0) / 2
+    efficiency = max(0, 1 - state.get("time", 100) / 100)
+    battery = state.get("battery", 0) / 100
 
-def run():
+    score = 0.5 * completion + 0.3 * efficiency + 0.2 * battery
+
+    return max(0, min(score, 1))
+
+
+# -----------------------------
+# Main
+# -----------------------------
+def main():
+
+    # Force LLM call
+    ping_llm()
+
     scores = {}
 
     for task in ["easy", "medium", "hard"]:
-        scores[task] = run_task(task)
 
-    print(f"[END] final_scores={scores}")
+        final_state = run_task(task)
+
+        score = grade(final_state)
+
+        scores[task] = score
+
+        print(f"{task} score: {score:.3f}")
+
+    print("\nFinal Scores")
+    print(scores)
+
 
 if __name__ == "__main__":
-    run()
+    main()
