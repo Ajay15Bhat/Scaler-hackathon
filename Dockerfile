@@ -25,10 +25,12 @@ RUN pip install --no-cache-dir \
     openai \
     openenv-core
 
+ENV PATH="/root/.local/bin:$PATH"
 # ------------------------
 # EXPOSE PORT
 # ------------------------
 EXPOSE 7860
+
 
 # ------------------------
 # RUN SERVER
