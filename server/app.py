@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
-from environment import WarehouseEnv
+from server.environment import WarehouseEnv
 from tasks import TASKS
 
 app = FastAPI()
