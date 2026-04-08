@@ -1,0 +1,19 @@
+[project]
+name = "hybrid-warehouse-agent"
+version = "0.1.0"
+description = "Warehouse order fulfillment OpenEnv environment"
+authors = [{ name = "Ajay Bhat" }]
+
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "pydantic",
+    "requests",
+    "openenv-core>=0.2.0"
+]
+
+[project.scripts]
+server = "server.app:main"
+
+[tool.openenv]
+entrypoint = "server/app.py"

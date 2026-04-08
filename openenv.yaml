@@ -1,0 +1,12 @@
+name: hybrid-warehouse-agent
+
+description: >
+  A hybrid environment where an agent must use API calls and physical navigation
+  to complete warehouse order fulfillment tasks.
+
+entrypoint: app.py
+
+tasks:
+  - easy
+  - medium
+  - hard
