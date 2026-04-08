@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from environment import WarehouseEnv
+from tasks import TASKS
 
 app = FastAPI()
 
@@ -10,9 +11,22 @@ class Action(BaseModel):
     action: str
 
 @app.post("/reset")
-def reset():
+def reset(task: dict = None):
     state = env.reset()
-    return {"observation": state}
+
+    if task and "task_name" in task:
+        task_name = task["task_name"]
+
+        if task_name in TASKS:
+            config = TASKS[task_name]()
+
+            # Inject task config into environment
+            env._state["orders"] = config["orders"]
+            env._state["battery"] = config["battery"]
+
+    return {
+        "observation": env.state()
+    }
 
 @app.post("/step")
 def step(action: Action):
