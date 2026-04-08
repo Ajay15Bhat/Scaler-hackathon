@@ -1,8 +1,8 @@
 ---
-title: Warehouse Agent
-emoji: 🚀
-colorFrom: blue
-colorTo: green
+Title: Warehouse Agent
+Emoji: 🚀
+ColorFrom: blue
+ColorTo: green
 sdk: docker
 app_file: app.py
 pinned: false
