@@ -1,8 +1,10 @@
+from models import State
+
+
 class WarehouseEnv:
     def __init__(self):
         self.GRID_SIZE = 5
 
-        # Warehouse Grid (D = Drop Zone)
         self.grid = [
             ["S", ".", "A", ".", "D"],
             [".", "X", ".", ".", "B"],
@@ -14,14 +16,8 @@ class WarehouseEnv:
         self.max_capacity = 2
 
         self.actions = [
-            "move_up",
-            "move_down",
-            "move_left",
-            "move_right",
-            "pick_item",
-            "deliver",
-            "get_order",
-            "complete_order"
+            "move_up", "move_down", "move_left", "move_right",
+            "pick_item", "get_order", "complete_order"
         ]
 
         self.reset()
@@ -42,7 +38,7 @@ class WarehouseEnv:
         }
 
         self.find_items()
-        return self._state
+        return self.state()
 
     # ------------------------
     # FIND ITEMS
@@ -58,85 +54,84 @@ class WarehouseEnv:
     # MOVE
     # ------------------------
     def move(self, action):
-        row, col = self._state["agent_position"]
+        r, c = self._state["agent_position"]
 
         if action == "move_up":
-            row -= 1
+            r -= 1
         elif action == "move_down":
-            row += 1
+            r += 1
         elif action == "move_left":
-            col -= 1
+            c -= 1
         elif action == "move_right":
-            col += 1
+            c += 1
 
-        if 0 <= row < self.GRID_SIZE and 0 <= col < self.GRID_SIZE:
-            if self.grid[row][col] != "X":
-                self._state["agent_position"] = [row, col]
+        if 0 <= r < self.GRID_SIZE and 0 <= c < self.GRID_SIZE:
+            if self.grid[r][c] != "X":
+                self._state["agent_position"] = [r, c]
 
     # ------------------------
-    # PICK ITEM
+    # PICK ITEM (IMPROVED 🔥)
     # ------------------------
     def pick_item(self):
         pos = self._state["agent_position"]
 
-        # Capacity constraint
         if len(self._state["inventory"]) >= self.max_capacity:
             return False, "capacity_full"
 
         for item, loc in self._state["item_locations"].items():
-            if loc == pos and item not in self._state["inventory"]:
-                self._state["inventory"].append(item)
-                return True, item
+            if loc == pos:
+                if item in self._state["inventory"]:
+                    return False, "already_picked"
 
-        return False, None
+                self._state["inventory"].append(item)
+
+                # Reward shaping
+                if self._state["current_order"] and item in self._state["current_order"]:
+                    return True, "correct"
+                else:
+                    return True, "wrong_item"
+
+        return False, "no_item"
 
     # ------------------------
-    # DELIVERY CHECK
+    # DROP ZONE CHECK
     # ------------------------
     def at_drop_zone(self):
         r, c = self._state["agent_position"]
         return self.grid[r][c] == "D"
 
     # ------------------------
-    # STEP FUNCTION
+    # STEP FUNCTION (UPGRADED 🔥)
     # ------------------------
     def step(self, action):
         reward = 0
 
         # Movement
-        if action in ["move_up", "move_down", "move_left", "move_right"]:
+        if action.startswith("move"):
+            prev_pos = self._state["agent_position"].copy()
             self.move(action)
-            reward -= 0.1
+
+            if self._state["agent_position"] == prev_pos:
+                reward -= 0.3  # hitting wall penalty
+            else:
+                reward -= 0.1
 
         # Get Order
         elif action == "get_order":
             if self._state["current_order"] is None and self._state["orders"]:
                 self._state["current_order"] = self._state["orders"].pop(0)
-                reward += 1
-            else:
-                reward -= 0.5
-
-        # Pick Item
-        elif action == "pick_item":
-            picked, item = self.pick_item()
-
-            if picked:
-                if self._state["current_order"] and item in self._state["current_order"]:
-                    reward += 2
-                else:
-                    reward -= 1
+                reward += 2  # stronger incentive
             else:
                 reward -= 1
 
-        # Deliver
-        elif action == "deliver":
-            if self.at_drop_zone() and self._state["current_order"]:
-                if set(self._state["inventory"]) == set(self._state["current_order"]):
-                    reward += 5
-                    self._state["orders_completed"] += 1
-                    self._state["inventory"] = []
-                    self._state["current_order"] = None
-                else:
+        # Pick Item
+        elif action == "pick_item":
+            success, reason = self.pick_item()
+
+            if success:
+                if reason == "correct":
+                    reward += 3
+                elif reason == "wrong_item":
                     reward -= 2
             else:
                 reward -= 2
@@ -145,41 +140,43 @@ class WarehouseEnv:
         elif action == "complete_order":
             if self.at_drop_zone() and self._state["current_order"]:
                 if set(self._state["inventory"]) == set(self._state["current_order"]):
-                    reward += 5
+                    reward += 10
                     self._state["orders_completed"] += 1
                     self._state["inventory"] = []
                     self._state["current_order"] = None
                 else:
-                    reward -= 2
+                    reward -= 4
             else:
-                reward -= 2
+                reward -= 3
 
-        # Auto assign order
-        if self._state["current_order"] is None and self._state["orders"]:
-            self._state["current_order"] = self._state["orders"][0]
+        else:
+            reward -= 2
 
-        # Time + Battery
+        # Time & battery
         self._state["time"] += 1
         self._state["battery"] -= 1
 
-        # Done Conditions
+        # Done conditions
         done = False
 
-        if self._state["orders_completed"] >= 2:
-            reward += 10
+        if not self._state["orders"] and self._state["current_order"] is None:
+            reward += 20  # BIG completion bonus
             done = True
 
-        if self._state["battery"] <= 0:
+        if self._state["battery"] <= 0 or self._state["time"] > 150:
             done = True
 
-        if self._state["time"] > 100:
-            done = True
-
-        return self._state, reward, done, {}
+        return self.state(), reward, done, {}
 
     # ------------------------
-    # STATE FUNCTION (OpenEnv Spec)
+    # STATE OUTPUT
     # ------------------------
     def state(self):
-        return self._state
-        
+        return State(
+            agent_position=self._state["agent_position"],
+            inventory=self._state["inventory"],
+            current_order=self._state["current_order"],
+            orders_completed=self._state["orders_completed"],
+            time=self._state["time"],
+            battery=self._state["battery"]
+        ).model_dump()
